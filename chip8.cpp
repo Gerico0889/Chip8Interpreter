@@ -1,4 +1,5 @@
 #include <fstream>
+#include <random>
 
 static constexpr const unsigned int W = 64, H = 32;
 
@@ -10,9 +11,11 @@ struct chip8 {
 		struct {
 			unsigned char Reg[16], DelayTimer, SoundTimer, Keys[16], SP;
 			unsigned int DisplayMem[W * H], Fonts[80];
-			unsigned short Stack[16], PC, RegIdx;
+			unsigned short Stack[16], PC, RegIdx, opcode;
 		};
 	};
+
+	std::mt19937 rnd{};
 
 	chip8() {
 
@@ -27,7 +30,7 @@ struct chip8 {
 			for (int shift = 16; shift >= 0; shift -= 4) {
 				// Shift the bits and do a bitwise and with 0xF
 				// in order to take 4 bits at a time
-				// starting from the end of each font letter/number
+				// starting from the beginning of each font letter/number
 				*begin++ = (f >> shift & 0xF);
 			}
 
@@ -37,6 +40,30 @@ struct chip8 {
 	void loadROM(const char *filename, unsigned pos = 0x200) {
 		for (std::ifstream rom(filename, std::ios::binary); rom.good() ;)
 			Mem[pos++ & 0xFFF] = rom.get();
+	}
+
+	// Instructions
+	
+	// CLS: Clear the display
+	void OP_00E0() {
+		for (auto &pixel : DisplayMem)
+			pixel = 0;
+	}
+
+	// RET: Return from a subroutine
+	void OP_00EE() {
+		Stack[SP-- % 16];
+	}
+
+	// JP addr: jump to address nnn
+	void OP_1nnn() {
+		PC = opcode & 0xFFFu;
+	}
+
+	//CALL: call a subroutine
+	void OP_2nnn() {
+		Stack[SP++] = PC;
+		PC = opcode & 0xFFFu;
 	}
 
 };
