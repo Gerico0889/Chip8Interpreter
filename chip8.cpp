@@ -278,7 +278,7 @@ struct chip8 {
 			}
 		}
 
-		if (!pressed) return;
+		if (!pressed) PC -= 2;
 	}
 
 	// LD DT, Vx: set delay timer = Vx
