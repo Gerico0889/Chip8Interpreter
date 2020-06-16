@@ -1,5 +1,7 @@
 #include <fstream>
 #include <random>
+#include <vector>
+#include <functional>
 
 static constexpr const unsigned int W = 64, H = 32;
 
@@ -13,12 +15,19 @@ struct chip8 {
 			unsigned char DisplayMem[W * H], Fonts[80];
 			unsigned short Stack[16], PC, I, opcode;
 		};
-	};
+	}; 
 
 	std::mt19937 rnd{};
 
-	chip8() {
+	std::vector<std::function<void()>> opTable;
+	std::vector<std::function<void()>> opTable0;
+	std::vector<std::function<void()>> opTable8;
+	std::vector<std::function<void()>> opTableE;
+	std::vector<std::function<void()>> opTableF;
 
+	chip8() : opTable(16),  opTable0(15), opTable8(15), 
+			  opTableE(15), opTableF(66)				
+	{
 		// Load fonts
 		auto *begin = Fonts;
 		constexpr const unsigned fList[] = {0xF999F, 0x26227, 0xF1F87, 0xF1F1F,
@@ -35,6 +44,50 @@ struct chip8 {
 			}
 
 		}
+
+		// Fill optables
+		opTable[0x0] = std::bind(&chip8::table0, this);
+		opTable[0x1] = std::bind(&chip8::OP_1nnn, this);
+		opTable[0x2] = std::bind(&chip8::OP_2nnn, this);
+		opTable[0x3] = std::bind(&chip8::OP_3xkk, this);
+		opTable[0x4] = std::bind(&chip8::OP_4xkk, this);
+		opTable[0x5] = std::bind(&chip8::OP_5xy0, this);
+		opTable[0x6] = std::bind(&chip8::OP_6xkk, this);
+		opTable[0x7] = std::bind(&chip8::OP_7xkk, this);
+		opTable[0x8] = std::bind(&chip8::table8, this);
+		opTable[0x9] = std::bind(&chip8::OP_9xy0, this);
+		opTable[0xA] = std::bind(&chip8::OP_Annn, this);
+		opTable[0xB] = std::bind(&chip8::OP_Bnnn, this);
+		opTable[0xC] = std::bind(&chip8::OP_Cxkk, this);
+		opTable[0xD] = std::bind(&chip8::OP_Dxyn, this);
+		opTable[0xE] = std::bind(&chip8::tableE, this);
+		opTable[0xF] = std::bind(&chip8::tableF, this);
+
+		opTable0[0x0] = std::bind(&chip8::OP_00E0, this);
+		opTable0[0xE] = std::bind(&chip8::OP_00EE, this);
+
+		opTable8[0x0] = std::bind(&chip8::OP_8xy0, this);
+		opTable8[0x1] = std::bind(&chip8::OP_8xy1, this);
+		opTable8[0x2] = std::bind(&chip8::OP_8xy2, this);
+		opTable8[0x3] = std::bind(&chip8::OP_8xy3, this);
+		opTable8[0x4] = std::bind(&chip8::OP_8xy4, this);
+		opTable8[0x5] = std::bind(&chip8::OP_8xy5, this);
+		opTable8[0x6] = std::bind(&chip8::OP_8xy6, this);
+		opTable8[0x7] = std::bind(&chip8::OP_8xy7, this);
+		opTable8[0xE] = std::bind(&chip8::OP_8xyE, this);
+
+		opTableE[0x1] = std::bind(&chip8::OP_ExA1, this);
+		opTableE[0xE] = std::bind(&chip8::OP_Ex9E, this);
+
+		opTableF[0x07] = std::bind(&chip8::OP_Fx07, this);
+		opTableF[0x0A] = std::bind(&chip8::OP_Fx0A, this);
+		opTableF[0x15] = std::bind(&chip8::OP_Fx15, this);
+		opTableF[0x18] = std::bind(&chip8::OP_Fx18, this);
+		opTableF[0x1E] = std::bind(&chip8::OP_Fx1E, this);
+		opTableF[0x29] = std::bind(&chip8::OP_Fx29, this);
+		opTableF[0x33] = std::bind(&chip8::OP_Fx33, this);
+		opTableF[0x55] = std::bind(&chip8::OP_Fx55, this);
+		opTableF[0x65] = std::bind(&chip8::OP_Fx65, this);
 	}
 
 	void loadROM(const char *filename, unsigned pos = 0x200) {
@@ -42,8 +95,23 @@ struct chip8 {
 			Mem[pos++ & 0xFFF] = rom.get();
 	}
 
+	void table0() {
+		this->opTable0[opcode & 0x000Fu]();
+	}
+
+	void table8() {
+		this->opTable8[opcode & 0x000Fu]();
+	}
+
+	void tableE() {
+		this->opTableE[opcode & 0x000Fu]();
+	}
+
+	void tableF() {
+		this->opTableF[opcode & 0x000Fu]();
+	}	
+
 	// Instructions
-	
 	// CLS: Clear the display
 	void OP_00E0() {
 		for (auto &pixel : DisplayMem)
@@ -211,14 +279,14 @@ struct chip8 {
 	}
 
 	// RND Vx, byte: set Vx = random byte & kk
-	void OP_cxkk() {
+	void OP_Cxkk() {
 		const unsigned Vx = (opcode & 0x0F00) >> 8u;
 
 		Reg[Vx] = std::uniform_int_distribution<>(0,255)(rnd) & (opcode & 0x00FFu);
 	}
 
 	// DRW Vx, Vy, nibble: display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
-	void OP_dxyn() {
+	void OP_Dxyn() {
 		const unsigned n  = (opcode & 0x000F);
 
 		// Check boundaries
@@ -335,6 +403,8 @@ struct chip8 {
 			Reg[i] = Mem[I++ & 0x0FFF] ;
 		}
 	}
+
+	void OP_Null() {}
 };
 
 
