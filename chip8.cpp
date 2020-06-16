@@ -10,7 +10,7 @@ struct chip8 {
 		
 		struct {
 			unsigned char Reg[16], DelayTimer, SoundTimer, Keys[16], SP;
-			unsigned int DisplayMem[W * H], Fonts[80];
+			unsigned char DisplayMem[W * H], Fonts[80];
 			unsigned short Stack[16], PC, I, opcode;
 		};
 	};
@@ -244,7 +244,97 @@ struct chip8 {
 		}
 	}
 
+	// SKP Vx: skip next instruction if key with value Vx is pressed
+	void OP_Ex9E() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
 
+		if (Keys[Vx & 15]) PC += 2;
+	}
+
+	// SKN Vx: skip next instruction if key with value Vx is not pressed
+	void OP_ExA1() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		if (!Keys[Vx & 15]) PC += 2;
+	}
+
+	// LD Vx, DT: set Vx = delay timer value
+	void OP_Fx07() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		Reg[Vx] = DelayTimer;
+	}
+
+	// LD Vx, K: waits for a key press and store the value in Vx
+	void OP_Fx0A() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+		auto pressed = false;
+
+		for (int i = 0; i < 16; ++i) {
+			if (Keys[i]) {
+				Reg[Vx] = i;
+				pressed = true;
+				break;
+			}
+		}
+
+		if (!pressed) return;
+	}
+
+	// LD DT, Vx: set delay timer = Vx
+	void OP_Fx15() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		DelayTimer = Reg[Vx];
+	}
+
+	// LD ST, Vx: set sound timper = Vx
+	void OP_Fx18() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		SoundTimer = Reg[Vx];
+	}
+
+	// ADD I, Vx: set I = I + Vx
+	void OP_Fx1E() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+		
+		I += Reg[Vx];
+	}
+
+    // LD F, Vx: set I = location of sprite for digit Vx
+	void OP_Fx29() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		I = Fonts[Reg[Vx] * 5];
+	}
+
+	// LD B, Vx: store the BCD representation of Vx in I, I+1 and I+2
+	void OP_Fx33() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		Mem[(I     & 0xFFF)] = (Reg[Vx]/100)%10;
+		Mem[((I+1) & 0xFFF)] = (Reg[Vx]/10)%10;
+		Mem[((I+2) & 0xFFF)] = (Reg[Vx]/1)%10;
+	}
+
+	// LD [I], Vx: store registers V0 through Vx in memory starting at location I
+	void OP_Fx55() {
+		unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		for (unsigned i = 0; i < Vx; ++Vx) {
+			Mem[I++ & 0x0FFF] = Reg[i];
+		}
+	}
+
+	// LD Vx, [I]: load registers V0 through Vx from memory starting at location I
+	void OP_Fx65() {
+		unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		for (unsigned i = 0; i < Vx; ++Vx) {
+			Reg[i] = Mem[I++ & 0x0FFF] ;
+		}
+	}
 };
 
 
