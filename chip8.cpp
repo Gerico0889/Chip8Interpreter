@@ -329,9 +329,9 @@ struct chip8 {
 
 	// LD Vx, [I]: load registers V0 through Vx from memory starting at location I
 	void OP_Fx65() {
-		unsigned Vx = (opcode & 0x0F00) >> 8u;
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
 
-		for (unsigned i = 0; i < Vx; ++Vx) {
+		for (unsigned i = 0; i < Vx; ++i) {
 			Reg[i] = Mem[I++ & 0x0FFF] ;
 		}
 	}
