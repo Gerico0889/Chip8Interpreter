@@ -11,7 +11,7 @@ struct chip8 {
 		struct {
 			unsigned char Reg[16], DelayTimer, SoundTimer, Keys[16], SP;
 			unsigned int DisplayMem[W * H], Fonts[80];
-			unsigned short Stack[16], PC, RegIdx, opcode;
+			unsigned short Stack[16], PC, I, opcode;
 		};
 	};
 
@@ -191,6 +191,59 @@ struct chip8 {
 		Reg[0xF] = (Reg[Vx] & 0x80u) >> 7u;
 		Reg[Vx] <<= 1;
 	}
+
+	// SNE Vx, Vy: skip next instruction if Vx != Vy
+	void OP_9xy0() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+		const unsigned Vy = (opcode & 0x00F0) >> 4u;
+		
+		if (Reg[Vx] != Reg[Vy]) PC += 2;
+	}
+
+	// LD I, addr: set I = nnn
+	void OP_Annn() {
+		I = opcode & 0x0FFFu;
+	}
+
+	// JP V0, addr: jump to location nnn + V0
+	void OP_Bnnn() {
+		PC = Reg[0] + (opcode & 0x0FFFu);
+	}
+
+	// RND Vx, byte: set Vx = random byte & kk
+	void OP_cxkk() {
+		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+
+		Reg[Vx] = std::uniform_int_distribution<>(0,255)(rnd) & (opcode & 0x00FFu);
+	}
+
+	// DRW Vx, Vy, nibble: display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
+	void OP_dxyn() {
+		const unsigned n  = (opcode & 0x000F);
+
+		// Check boundaries
+		const unsigned xPos = Reg[(opcode & 0x0F00) >> 8u] % W;
+		const unsigned yPos = Reg[(opcode & 0x00F0) >> 4u] % H;
+
+		Reg[0xF] = 0;
+		for (unsigned row = 0; row < n; ++row) {
+			auto spriteByte = Mem[I + row];
+
+			for (int col = 0; col < 8; ++col) {
+				auto spritePixel = spriteByte & (0x80 >> col);
+
+				if (spritePixel) {					
+					auto &displayPixel = DisplayMem[(yPos + row) * W + (xPos + col)];
+
+					if (displayPixel == 0xFFFFFFFF)
+						Reg[0xF] = 1;
+
+					displayPixel ^= 0xFFFFFFFF;
+				}
+			}
+		}
+	}
+
 
 };
 
