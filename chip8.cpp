@@ -1,412 +1,324 @@
 #include <fstream>
-#include <random>
-#include <vector>
-#include <functional>
 
-static constexpr const unsigned int W = 64, H = 32;
+#include "chip8.hpp"
 
-struct chip8 {
-	union {
-		// Memory of the chip 8, 4096 bytes
-		unsigned char Mem[0x1000] {0};
+Chip8::Chip8() : 
+	SoundTimer(0), DelayTimer(0),
+	pc(0x200), SP(0), I(0), opcode(0)
+{
+	for (int i = 0; i < 80; ++i) {
+		Mem[i] = FontSet[i];
+	}
+
+	// Set up function pointer table
+	table[0x0] = &Chip8::Table0;
+	table[0x1] = &Chip8::OP_1nnn;
+	table[0x2] = &Chip8::OP_2nnn;
+	table[0x3] = &Chip8::OP_3xkk;
+	table[0x4] = &Chip8::OP_4xkk;
+	table[0x5] = &Chip8::OP_5xy0;
+	table[0x6] = &Chip8::OP_6xkk;
+	table[0x7] = &Chip8::OP_7xkk;
+	table[0x8] = &Chip8::Table8;
+	table[0x9] = &Chip8::OP_9xy0;
+	table[0xA] = &Chip8::OP_Annn;
+	table[0xB] = &Chip8::OP_Bnnn;
+	table[0xC] = &Chip8::OP_Cxkk;
+	table[0xD] = &Chip8::OP_Dxyn;
+	table[0xE] = &Chip8::TableE;
+	table[0xF] = &Chip8::TableF;
+
+	table0[0x0] = &Chip8::OP_00E0;
+	table0[0xE] = &Chip8::OP_00EE;
+
+	table8[0x0] = &Chip8::OP_8xy0;
+	table8[0x1] = &Chip8::OP_8xy1;
+	table8[0x2] = &Chip8::OP_8xy2;
+	table8[0x3] = &Chip8::OP_8xy3;
+	table8[0x4] = &Chip8::OP_8xy4;
+	table8[0x5] = &Chip8::OP_8xy5;
+	table8[0x6] = &Chip8::OP_8xy6;
+	table8[0x7] = &Chip8::OP_8xy7;
+	table8[0xE] = &Chip8::OP_8xyE;
+
+	tableE[0x1] = &Chip8::OP_ExA1;
+	tableE[0xE] = &Chip8::OP_Ex9E;
+
+	tableF[0x07] = &Chip8::OP_Fx07;
+	tableF[0x0A] = &Chip8::OP_Fx0A;
+	tableF[0x15] = &Chip8::OP_Fx15;
+	tableF[0x18] = &Chip8::OP_Fx18;
+	tableF[0x1E] = &Chip8::OP_Fx1E;
+	tableF[0x29] = &Chip8::OP_Fx29;
+	tableF[0x33] = &Chip8::OP_Fx33;
+	tableF[0x55] = &Chip8::OP_Fx55;
+	tableF[0x65] = &Chip8::OP_Fx65;
+}
+
+void
+Chip8::loadRom(const char *filename) {
+	unsigned startPos = 0x200;
+	
+	for (std::ifstream rom(filename, std::ios::binary); rom.good() ;)
+		Mem[startPos++ & 0xFFF] = rom.get();
+}
+
+void
+Chip8::cycle() {
+
+	// Fetch opcode
+	opcode = Mem[pc] << 8 | Mem[pc + 1];
+
+	// Increment pc
+	pc += 2;
+
+	// Set aliases
+	x = (opcode & 0x0F00) >> 8;
+	y = (opcode & 0x00F0) >> 4;
+	n = opcode & 0x000F;
+	nnn = opcode & 0x0FFF;
+	kk = opcode & 0x00FF;
+
+	// Decode and execute
+	((*this).*(table[(opcode & 0xF000u) >> 12u]))();
+	
+	// Update  timers
+	if (DelayTimer > 0) --DelayTimer;
+	if (SoundTimer > 0) --SoundTimer;
+}
+
+void
+Chip8::Table0() {
+	((*this).*(table0[opcode & 0x000Fu]))();
+}
+
+void
+Chip8::Table8() {
+	((*this).*(table8[opcode & 0x000Fu]))();
+}
+
+void
+Chip8::TableE() {
+	((*this).*(tableE[opcode & 0x000Fu]))();
+}
+
+void
+Chip8::TableF() {
+	((*this).*(tableF[opcode & 0x00FFu]))();
+}
+
+void
+Chip8::OP_NULL() {  }
+
+void
+Chip8::OP_00E0() {
+	for (auto &p : Display) p = 0;
+}
+
+void
+Chip8::OP_00EE() {
+	pc = Stack[SP--];
+}
+
+void
+Chip8::OP_1nnn() {
+	pc = nnn;
+}
+
+void
+Chip8::OP_2nnn() {
+	// Save pc for ret call
+	Stack[++SP] = pc;
+	pc = nnn;
+}
+
+void
+Chip8::OP_3xkk() {
+	if (V[x] == kk) pc += 2;
+}
+
+void
+Chip8::OP_4xkk() {
+	if (V[x] != kk) pc += 2;
+}
+
+void
+Chip8::OP_5xy0() {
+	if (V[x] == V[y]) pc += 2;
+}
+
+void
+Chip8::OP_6xkk() {
+	V[x] = kk;
+}
+
+void
+Chip8::OP_7xkk() {
+	V[x] += kk;
+}
+
+void
+Chip8::OP_8xy0() {
+	V[x] = V[y];
+}
+
+void
+Chip8::OP_8xy1() {
+	V[x] |= V[y];
+}
+
+void
+Chip8::OP_8xy2() {
+	V[x] &= V[y];
+}
+
+void
+Chip8::OP_8xy3() {
+	V[x] ^= V[y];
+}
+
+void
+Chip8::OP_8xy4() {
+	const auto res = V[x] + V[y];
+
+	V[x]   = res;
+	V[0xF] = res >> 8;
+}
+
+void
+Chip8::OP_8xy5() {
+	const auto res = V[x] - V[y];
+
+	V[x]   = res;
+	V[0xF] = !(res >> 8);
+}
+
+void
+Chip8::OP_8xy6() {
+	V[0xF] = V[x] & 0x1;
+	V[x] >>= 1;
+}
+
+void
+Chip8::OP_8xy7() {
+	const auto res = V[y] - V[x];
+
+	V[x]   = res;
+	V[0xF] = !(res >> 8);
+}
+
+void
+Chip8::OP_8xyE() {
+	V[0xF] = V[x] >> 7;
+	V[x] <<= 1;
+}
+
+void
+Chip8::OP_9xy0() {
+	if (V[x] != V[y]) pc += 2;
+}
+
+void
+Chip8::OP_Annn() {
+	I = nnn;
+}
+
+void
+Chip8::OP_Bnnn() {
+	pc = nnn + V[0x0];
+}
+
+void
+Chip8::OP_Cxkk() {
+	const auto random = std::uniform_int_distribution<>(0,255)(rnd);
+
+	V[x] = random & kk;
+}
+
+void
+Chip8::OP_Dxyn() {
+	unsigned short pixel;
+
+	unsigned char xPos = V[x] % W;
+	unsigned char yPos = V[y] % H;
+
+	V[0xF] = 0;
+	for (unsigned int row = 0; row < n; ++row) {
+		pixel = Mem[I + row];
 		
-		struct {
-			unsigned char Reg[16], DelayTimer, SoundTimer, Keys[16], SP;
-			unsigned char DisplayMem[W * H], Fonts[80];
-			unsigned short Stack[16], PC, I, opcode;
-		};
-	}; 
+		for (unsigned int col = 0; col < 8; ++col) {
+			unsigned char spritePixel = pixel & (0x80 >> col);
 
-	std::mt19937 rnd{};
+			if (spritePixel) {
+				unsigned int &disp = Display[(yPos + row) * W + (xPos + col)];
 
-	std::vector<std::function<void()>> opTable;
-	std::vector<std::function<void()>> opTable0;
-	std::vector<std::function<void()>> opTable8;
-	std::vector<std::function<void()>> opTableE;
-	std::vector<std::function<void()>> opTableF;
+				if (disp == 0xFFFFFFFF)
+					V[0xF] = 1;
 
-	chip8() : opTable(16),  opTable0(15), opTable8(15), 
-			  opTableE(15), opTableF(66)				
-	{
-		// Load fonts
-		auto *begin = Fonts;
-		constexpr const unsigned fList[] = {0xF999F, 0x26227, 0xF1F87, 0xF1F1F,
-                                            0x99F11, 0xF8F1F, 0xF8F9F, 0xF1244,
-                                            0xF9F9F, 0xF9F1F, 0xF9F99, 0xE9E9E,
-                                            0xF888F, 0xE999E, 0xF8F8F, 0xF8F88};
-
-		for (unsigned f : fList) {
-			for (int shift = 16; shift >= 0; shift -= 4) {
-				// Shift the bits and do a bitwise and with 0xF
-				// in order to take 4 bits at a time
-				// starting from the beginning of each font letter/number
-				*begin++ = (f >> shift & 0xF);
-			}
-
-		}
-
-		// Fill optables
-		opTable[0x0] = std::bind(&chip8::table0, this);
-		opTable[0x1] = std::bind(&chip8::OP_1nnn, this);
-		opTable[0x2] = std::bind(&chip8::OP_2nnn, this);
-		opTable[0x3] = std::bind(&chip8::OP_3xkk, this);
-		opTable[0x4] = std::bind(&chip8::OP_4xkk, this);
-		opTable[0x5] = std::bind(&chip8::OP_5xy0, this);
-		opTable[0x6] = std::bind(&chip8::OP_6xkk, this);
-		opTable[0x7] = std::bind(&chip8::OP_7xkk, this);
-		opTable[0x8] = std::bind(&chip8::table8, this);
-		opTable[0x9] = std::bind(&chip8::OP_9xy0, this);
-		opTable[0xA] = std::bind(&chip8::OP_Annn, this);
-		opTable[0xB] = std::bind(&chip8::OP_Bnnn, this);
-		opTable[0xC] = std::bind(&chip8::OP_Cxkk, this);
-		opTable[0xD] = std::bind(&chip8::OP_Dxyn, this);
-		opTable[0xE] = std::bind(&chip8::tableE, this);
-		opTable[0xF] = std::bind(&chip8::tableF, this);
-
-		opTable0[0x0] = std::bind(&chip8::OP_00E0, this);
-		opTable0[0xE] = std::bind(&chip8::OP_00EE, this);
-
-		opTable8[0x0] = std::bind(&chip8::OP_8xy0, this);
-		opTable8[0x1] = std::bind(&chip8::OP_8xy1, this);
-		opTable8[0x2] = std::bind(&chip8::OP_8xy2, this);
-		opTable8[0x3] = std::bind(&chip8::OP_8xy3, this);
-		opTable8[0x4] = std::bind(&chip8::OP_8xy4, this);
-		opTable8[0x5] = std::bind(&chip8::OP_8xy5, this);
-		opTable8[0x6] = std::bind(&chip8::OP_8xy6, this);
-		opTable8[0x7] = std::bind(&chip8::OP_8xy7, this);
-		opTable8[0xE] = std::bind(&chip8::OP_8xyE, this);
-
-		opTableE[0x1] = std::bind(&chip8::OP_ExA1, this);
-		opTableE[0xE] = std::bind(&chip8::OP_Ex9E, this);
-
-		opTableF[0x07] = std::bind(&chip8::OP_Fx07, this);
-		opTableF[0x0A] = std::bind(&chip8::OP_Fx0A, this);
-		opTableF[0x15] = std::bind(&chip8::OP_Fx15, this);
-		opTableF[0x18] = std::bind(&chip8::OP_Fx18, this);
-		opTableF[0x1E] = std::bind(&chip8::OP_Fx1E, this);
-		opTableF[0x29] = std::bind(&chip8::OP_Fx29, this);
-		opTableF[0x33] = std::bind(&chip8::OP_Fx33, this);
-		opTableF[0x55] = std::bind(&chip8::OP_Fx55, this);
-		opTableF[0x65] = std::bind(&chip8::OP_Fx65, this);
-	}
-
-	void loadROM(const char *filename, unsigned pos = 0x200) {
-		for (std::ifstream rom(filename, std::ios::binary); rom.good() ;)
-			Mem[pos++ & 0xFFF] = rom.get();
-	}
-
-	void table0() {
-		this->opTable0[opcode & 0x000Fu]();
-	}
-
-	void table8() {
-		this->opTable8[opcode & 0x000Fu]();
-	}
-
-	void tableE() {
-		this->opTableE[opcode & 0x000Fu]();
-	}
-
-	void tableF() {
-		this->opTableF[opcode & 0x000Fu]();
-	}	
-
-	// Instructions
-	// CLS: Clear the display
-	void OP_00E0() {
-		for (auto &pixel : DisplayMem)
-			pixel = 0;
-	}
-
-	// RET: Return from a subroutine
-	void OP_00EE() {
-		Stack[SP-- % 16];
-	}
-
-	// JP addr: jump to address nnn
-	void OP_1nnn() {
-		PC = opcode & 0xFFFu;
-	}
-
-	//CALL: call a subroutine
-	void OP_2nnn() {
-		Stack[SP++] = PC;
-		PC = opcode & 0xFFFu;
-	}
-
-	// SE Vx, byte: if Vx == kk increase the PC by 2
-	void OP_3xkk() {
-		// Vx indicates the 4 least significant bits of the high byte
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		// kk indicates the lowest 8bits of the instruction
-		const unsigned kk = opcode & 0x00FF;
-
-		if (Reg[Vx] == kk) PC += 2;
-	}
-
-	// SNE Vx, byte: if Vx != kk increase the PC by 2
-	void OP_4xkk() {
-		// Vx indicates the 4 least significant bits of the high byte
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		// kk indicates the lowest 8bits of the instruction
-		const unsigned kk = opcode & 0x00FF;
-
-		if (Reg[Vx] != kk) PC += 2;
-	}
-
-	// SE Vx, Vy: if Vx == Vy increase the PC by 2
-	void OP_5xy0() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		// Vy indicates the 4 most significant bits of the low byte
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		if (Reg[Vx] == Reg[Vy]) PC += 2;
-	}
-
-	// LD Vx, byte: set Vx = kk
-	void OP_6xkk() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned kk = opcode & 0x00FF;
-
-		Reg[Vx] = kk;
-	}
-
-	// ADD Vx, byte: set Vx = Vx + kk
-	void OP_7xkk() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned kk = opcode & 0x00FF;
-
-		Reg[Vx] += kk;
-	}
-
-	// LD Vx, Vy: set Vx = Vy
-	void OP_8xy0() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		Reg[Vx] = Reg[Vy];
-	}
-
-	// OR Vx, Vy: set Vx = Vx or Vy
-	void OP_8xy1() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		Reg[Vx] |= Reg[Vy];
-	}
-
-	// AND Vx, Vy: set Vx = Vx and Vy
-	void OP_8xy2() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		Reg[Vx] &= Reg[Vy];
-	}
-
-	// XOR Vx, Vy: set Vx = Vx xor Vy
-	void OP_8xy3() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		Reg[Vx] ^= Reg[Vy];
-	}
-
-	// ADD Vx, Vy: set Vx = Vx + Vy, set VF = carry
-	void OP_8xy4() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		unsigned res = Reg[Vx] + Reg[Vy];
-		Reg[0xF] = res >> 8u;
-		Reg[Vx] = res & 0x00FFu;
-	}
-
-	// SUB Vx, Vy: set Vx = Vx - Vy, set VF = NOT borrow
-	void OP_8xy5() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		unsigned res = Reg[Vx] - Reg[Vy];
-		Reg[0xF] = !(res >> 8u);
-		Reg[Vx] = res;
-	}
-
-	// SHR Vx {, Vy}: set Vx = Vx SHR 1
-	void OP_8xy6() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		Reg[0xF] = Reg[Vx] & 0x1u;
-		Reg[Vx] >>= 1;
-	}
-
-	// SUBN Vx, Vy: set Vx = Vy - Vx, VF = NOT borrow
-	void OP_8xy7() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-
-		unsigned res = Reg[Vy] - Reg[Vx];
-		Reg[0xF] = !(res >> 8u);
-		Reg[Vx] = res;
-	}
-
-	// SHL Vx {, Vy}: set Vx = Vx SHL 1
-	void OP_8xyE() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		Reg[0xF] = (Reg[Vx] & 0x80u) >> 7u;
-		Reg[Vx] <<= 1;
-	}
-
-	// SNE Vx, Vy: skip next instruction if Vx != Vy
-	void OP_9xy0() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		const unsigned Vy = (opcode & 0x00F0) >> 4u;
-		
-		if (Reg[Vx] != Reg[Vy]) PC += 2;
-	}
-
-	// LD I, addr: set I = nnn
-	void OP_Annn() {
-		I = opcode & 0x0FFFu;
-	}
-
-	// JP V0, addr: jump to location nnn + V0
-	void OP_Bnnn() {
-		PC = Reg[0] + (opcode & 0x0FFFu);
-	}
-
-	// RND Vx, byte: set Vx = random byte & kk
-	void OP_Cxkk() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		Reg[Vx] = std::uniform_int_distribution<>(0,255)(rnd) & (opcode & 0x00FFu);
-	}
-
-	// DRW Vx, Vy, nibble: display n-byte sprite starting at memory location I at (Vx, Vy), set VF = collision.
-	void OP_Dxyn() {
-		const unsigned n  = (opcode & 0x000F);
-
-		// Check boundaries
-		const unsigned xPos = Reg[(opcode & 0x0F00) >> 8u] % W;
-		const unsigned yPos = Reg[(opcode & 0x00F0) >> 4u] % H;
-
-		Reg[0xF] = 0;
-		for (unsigned row = 0; row < n; ++row) {
-			auto spriteByte = Mem[I + row];
-
-			for (int col = 0; col < 8; ++col) {
-				auto spritePixel = spriteByte & (0x80 >> col);
-
-				if (spritePixel) {					
-					auto &displayPixel = DisplayMem[(yPos + row) * W + (xPos + col)];
-
-					if (displayPixel == 0xFFFFFFFF)
-						Reg[0xF] = 1;
-
-					displayPixel ^= 0xFFFFFFFF;
-				}
+				disp ^= 0xFFFFFFFF;
 			}
 		}
 	}
+}
 
-	// SKP Vx: skip next instruction if key with value Vx is pressed
-	void OP_Ex9E() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+void
+Chip8::OP_Ex9E() {
+	if (Keys[V[x]]) pc += 2;
+}
 
-		if (Keys[Vx & 15]) PC += 2;
+void
+Chip8::OP_ExA1() {
+	if (!(Keys[V[x]])) pc += 2;
+}
+
+void
+Chip8::OP_Fx07() {
+	V[x] = DelayTimer;
+}
+
+void
+Chip8::OP_Fx0A() {
+	for (int i = 0; i < 16; ++i) {
+		if (Keys[i]) V[x] = i;
+		else pc -= 2;
 	}
+}
 
-	// SKN Vx: skip next instruction if key with value Vx is not pressed
-	void OP_ExA1() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+void
+Chip8::OP_Fx15() {
+	DelayTimer = V[x];
+}
 
-		if (!Keys[Vx & 15]) PC += 2;
-	}
+void
+Chip8::OP_Fx18() {
+	SoundTimer = V[x];
+}
 
-	// LD Vx, DT: set Vx = delay timer value
-	void OP_Fx07() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
+void
+Chip8::OP_Fx1E() {
+	I += V[x];
+}
 
-		Reg[Vx] = DelayTimer;
-	}
+void
+Chip8::OP_Fx29() {
+	I = (5 * V[x]);
+}
 
-	// LD Vx, K: waits for a key press and store the value in Vx
-	void OP_Fx0A() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		auto pressed = false;
+void
+Chip8::OP_Fx33() {
+	Mem[I+0] = (V[x]/100) % 10;
+	Mem[I+1] = (V[x]/10) % 10;
+	Mem[I+2] = (V[x]/1) % 10;
+}
 
-		for (int i = 0; i < 16; ++i) {
-			if (Keys[i]) {
-				Reg[Vx] = i;
-				pressed = true;
-				break;
-			}
-		}
+void
+Chip8::OP_Fx55() {
+	for (unsigned int i = 0; i <= x; ++i)
+		Mem[I + i] = V[i];
+}
 
-		if (!pressed) PC -= 2;
-	}
-
-	// LD DT, Vx: set delay timer = Vx
-	void OP_Fx15() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		DelayTimer = Reg[Vx];
-	}
-
-	// LD ST, Vx: set sound timper = Vx
-	void OP_Fx18() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		SoundTimer = Reg[Vx];
-	}
-
-	// ADD I, Vx: set I = I + Vx
-	void OP_Fx1E() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-		
-		I += Reg[Vx];
-	}
-
-    // LD F, Vx: set I = location of sprite for digit Vx
-	void OP_Fx29() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		I = Fonts[Reg[Vx] * 5];
-	}
-
-	// LD B, Vx: store the BCD representation of Vx in I, I+1 and I+2
-	void OP_Fx33() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		Mem[(I     & 0xFFF)] = (Reg[Vx]/100)%10;
-		Mem[((I+1) & 0xFFF)] = (Reg[Vx]/10)%10;
-		Mem[((I+2) & 0xFFF)] = (Reg[Vx]/1)%10;
-	}
-
-	// LD [I], Vx: store registers V0 through Vx in memory starting at location I
-	void OP_Fx55() {
-		unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		for (unsigned i = 0; i < Vx; ++Vx) {
-			Mem[I++ & 0x0FFF] = Reg[i];
-		}
-	}
-
-	// LD Vx, [I]: load registers V0 through Vx from memory starting at location I
-	void OP_Fx65() {
-		const unsigned Vx = (opcode & 0x0F00) >> 8u;
-
-		for (unsigned i = 0; i < Vx; ++i) {
-			Reg[i] = Mem[I++ & 0x0FFF] ;
-		}
-	}
-
-	void OP_Null() {}
-};
-
-
-
-
+void
+Chip8::OP_Fx65() {
+	for (unsigned int i = 0; i <= x; ++i)
+		V[i] = Mem[I + i];
+}
